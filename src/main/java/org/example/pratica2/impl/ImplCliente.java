@@ -1,4 +1,4 @@
-package org.example.pratica2;
+package org.example.pratica2.impl;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -32,15 +32,23 @@ public class ImplCliente implements Runnable {
             saida.println(comandoCompleto);
 
             if (entrada.hasNextLine()) {
-                System.out.println(idCliente + " solicitou [" + comandoCompleto + "] a [" + endereco + "]");
-                System.out.println(entrada.nextLine());
+                String resp = entrada.nextLine();
+                synchronized (System.out) {
+                    System.out.println(idCliente + " solicitou [" + comandoCompleto + "] a [" + endereco + "]");
+                    System.out.println(resp);
+                    System.out.println("-----------------------------------------------------------------------------------------------------");
+
+                }
+
             }
-            System.out.println("-----------------------------------------------------------------------------------------------------");
             entrada.close();
             saida.close();
             socket.close();
         } catch (IOException e) {
-            System.out.println("[ERRO]: " + e.getMessage());
+            synchronized (System.out) {
+                System.out.println("[ERRO]: " + e.getMessage());
+            }
+
         }
     }
 

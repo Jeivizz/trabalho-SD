@@ -1,4 +1,4 @@
-package org.example.pratica2;
+package org.example.pratica2.impl;
 
 import java.io.IOException;
 import java.io.PrintStream;

@@ -1,5 +1,7 @@
 package org.example.pratica2;
 
+import org.example.pratica2.impl.ImplCliente;
+
 public class Cliente {
     String idCliente;
     String operacao;
@@ -25,9 +27,9 @@ public class Cliente {
         new Cliente("Cliente 3", "DIVISAO", "20 4");
 
         try { Thread.sleep(500); } catch (InterruptedException e) {}
-        System.out.println("\n==================== TESTES DE EXCEÇÃO ====================");
+        System.out.println("\n============================= TESTES DE EXCEÇÃO ===============================");
 
-        new Cliente("Cliente Erro 1", "DIVISAO", "10 0"); // Lança ArithmeticException
-        new Cliente("Cliente Erro 2", "SOMA", "dez 5");   // Lança NumberFormatException
+        new Cliente("Cliente Erro 1", "DIVISAO", "10 0");
+        new Cliente("Cliente Erro 2", "SOMA", "dez 5");
     }
 }
