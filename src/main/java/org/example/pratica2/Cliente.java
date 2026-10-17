@@ -14,6 +14,8 @@ public class Cliente {
         this.rodar();
     }
 
+
+    // Inicia o objeto ImplCliente e a Thread
     private void rodar() {
         ImplCliente cliente = new ImplCliente(idCliente, operacao, entradaBruta);
         Thread t = new Thread(cliente);

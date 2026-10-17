@@ -10,38 +10,38 @@ import java.net.Socket;
 public class ServidorCalculadora {
     static final String IP_DIRETORIO = "127.0.0.1";
     static final int PORTA_DIRETORIO = 9000;
-    static final int QTD_SERVERS = 3;
 
     int porta;
     String nome;
-
-
 
     public ServidorCalculadora(String nome, int porta) {
         this.nome = nome;
         this.porta = porta;
         this.registrarDiretorio();
-        this.rodar();
+        this.rodar(); /// Coloca o Servidor Calculadora para rodar assim que o objeto é instanciado
     }
 
+    // Função para registrar o endereço e porta do Servidor Diretório
     private void registrarDiretorio() {
         try {
-            Socket socket = new Socket(IP_DIRETORIO, PORTA_DIRETORIO);
+            Socket socket = new Socket(IP_DIRETORIO, PORTA_DIRETORIO); // Instancia o Socket do Servidor Diretório
             PrintStream saida = new PrintStream(socket.getOutputStream());
-            saida.println("/REGISTRAR " + IP_DIRETORIO + ":" + this.porta);
+            saida.println("/REGISTRAR " + IP_DIRETORIO + ":" + this.porta); // Retorno do Servidor Calculadora registrado no Diretório
             socket.close();
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
+    // Função para iniciar o Servidor Diretório automaticamente ao ser instanciado
     private void rodar() {
         try {
-            ServerSocket socketServidor = new ServerSocket(porta);
+            ServerSocket socketServidor = new ServerSocket(porta); // Definição do ServerSocket do Servidor Calculadora
             System.out.println(nome + " rodando na porta [" + socketServidor.getLocalPort() + "]");
             while (true) {
                 Socket cliente = socketServidor.accept();
                 ImplServidorCalculadora servidor = new ImplServidorCalculadora(cliente, nome);
+                // Instancia e inicia a Thread
                 Thread t = new Thread(servidor);
                 t.start();
             }

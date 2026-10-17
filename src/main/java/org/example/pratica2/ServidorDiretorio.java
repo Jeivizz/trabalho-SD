@@ -10,16 +10,17 @@ public class ServidorDiretorio {
 
     public ServidorDiretorio(int porta) {
         this.porta = porta;
-        this.rodar();
+        this.rodar(); // Roda Servidor Diretório ao ser instanciado
     }
 
     private void rodar() {
         try {
-            ServerSocket socketServidor = new ServerSocket(porta);
+            ServerSocket socketServidor = new ServerSocket(porta); // Define o Server Socket do servidor Diretório com sua porta
             System.out.println("Servidor de Diretório rodando na porta [" + socketServidor.getLocalPort() + "]");
             while(true) {
                 Socket cliente = socketServidor.accept();
                 ImplServidorDiretorio servidor = new ImplServidorDiretorio(cliente);
+                // Define e inicia a Thread
                 Thread t = new Thread(servidor);
                 t.start();
             }
