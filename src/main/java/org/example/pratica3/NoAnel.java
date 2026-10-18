@@ -1,8 +1,6 @@
 package org.example.pratica3;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.InetAddress;
@@ -48,7 +46,7 @@ public class NoAnel {
     public static final int PORTA_BASE = 7000;
     public static final String MSG_ERRO_ENTRADA = "Erro na entrada de dados. Tente outra vez!";
 
-    /** Formato aceito: arquivo<N>.ext, N inteiro positivo sem zeros à esquerda. */
+    // Formato aceito: arquivo<N>.ext, N inteiro positivo sem zeros à esquerda. 
     private static final Pattern FORMATO = Pattern.compile("^arquivo([1-9][0-9]{0,8})\\.ext$");
     private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
@@ -56,7 +54,7 @@ public class NoAnel {
     private final int sucessor;
     private final int antecessor;
     private final Set<String> arquivos = new HashSet<>(); // somente leitura após o construtor
-    /** Buscas iniciadas por este nó que ainda aguardam RESPOSTA (idBusca -> futuro). */
+    // Buscas iniciadas por este nó que ainda aguardam RESPOSTA (idBusca -> futuro). 
     private final Map<String, CompletableFuture<Mensagem>> pendentes = new ConcurrentHashMap<>();
     private final List<String> historico = Collections.synchronizedList(new ArrayList<>());
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
@@ -88,7 +86,7 @@ public class NoAnel {
         Thread aceitador = new Thread(this::aceitarConexoes, "P" + id + "-aceitador");
         aceitador.setDaemon(true);
         aceitador.start();
-        log("Nó iniciado na porta " + (PORTA_BASE + id) + " | sucessor=P" + sucessor
+        log("No iniciado na porta " + (PORTA_BASE + id) + " | sucessor=P" + sucessor
                 + " antecessor=P" + antecessor
                 + " | arquivos " + (id * ARQUIVOS_POR_NO + 1) + " a " + ((id + 1) * ARQUIVOS_POR_NO));
     }
@@ -110,7 +108,7 @@ public class NoAnel {
                 pool.execute(() -> tratarConexao(s));
             } catch (IOException e) {
                 if (!servidor.isClosed()) {
-                    log("Erro ao aceitar conexão: " + e.getMessage());
+                    log("Erro ao aceitar conexao: " + e.getMessage());
                 }
             }
         }
@@ -125,7 +123,7 @@ public class NoAnel {
                 processarResposta(m);
             }
         } catch (Exception e) {
-            log("Mensagem inválida/erro de leitura descartado: " + e);
+            log("Mensagem invlida/erro de leitura descartado: " + e);
         }
     }
 
@@ -148,13 +146,13 @@ public class NoAnel {
             return null;
         }
 
-        log("Usuário pediu busca de '" + arq + "'");
+        log("Usurio pediu busca de '" + arq + "'");
         CompletableFuture<Mensagem> futuro = new CompletableFuture<>();
 
         if (arquivos.contains(arq)) { // já é meu: não precisa usar a rede
             Mensagem local = Mensagem.busca(id, arq);
             local.caminho.add(id);
-            log("RESULTADO: '" + arq + "' é local (P" + id + "), nenhuma mensagem enviada");
+            log("RESULTADO: '" + arq + "' e local (P" + id + "), nenhuma mensagem enviada");
             futuro.complete(local.comoResposta(id, true));
             return futuro;
         }
@@ -164,7 +162,7 @@ public class NoAnel {
         pendentes.put(busca.id, futuro);
         if (!enviar(busca, sucessor)) {
             pendentes.remove(busca.id);
-            futuro.completeExceptionally(new IOException("sucessor P" + sucessor + " inacessível"));
+            futuro.completeExceptionally(new IOException("sucessor P" + sucessor + " inacessivel"));
         }
         return futuro;
     }
@@ -188,7 +186,7 @@ public class NoAnel {
             log("Possuo '" + m.arquivo + "'. Respondendo pelo antecessor P" + antecessor);
             enviar(m.comoResposta(id, true), antecessor);
         } else {
-            log("Não possuo '" + m.arquivo + "'. Repassando ao sucessor P" + sucessor);
+            log("Nao possuo '" + m.arquivo + "'. Repassando ao sucessor P" + sucessor);
             enviar(m, sucessor);
         }
     }
@@ -198,7 +196,7 @@ public class NoAnel {
         if (m.origem == id) {
             concluir(m);
         } else {
-            log("Não sou a origem. Repassando resposta ao antecessor P" + antecessor);
+            log("Nao sou a origem. Repassando resposta ao antecessor P" + antecessor);
             enviar(m, antecessor);
         }
     }
@@ -208,7 +206,7 @@ public class NoAnel {
             log("RESULTADO: '" + m.arquivo + "' encontrado em P" + m.responsavel
                     + " | caminho da busca: " + m.caminhoTexto());
         } else {
-            log("RESULTADO: '" + m.arquivo + "' NÃO encontrado no anel");
+            log("RESULTADO: '" + m.arquivo + "' NAO encontrado no anel");
         }
         CompletableFuture<Mensagem> f = pendentes.remove(m.id);
         if (f != null) {
@@ -261,39 +259,6 @@ public class NoAnel {
     // Modo "um processo por terminal": java NoAnel <id 0..5>
     // ------------------------------------------------------------------
 
-    public static void main(String[] args) throws Exception {
-        int id = -1;
-        if (args.length == 1) {
-            try {
-                id = Integer.parseInt(args[0]);
-            } catch (NumberFormatException ignorado) {
-                id = -1;
-            }
-        }
-        if (id < 0 || id >= TOTAL_NOS) {
-            System.out.println("Uso: java NoAnel <id de 0 a " + (TOTAL_NOS - 1) + ">");
-            return;
-        }
-
-        NoAnel no = new NoAnel(id);
-        no.iniciar();
-        System.out.println("Comandos: buscar <arquivoN.ext> | log | sair");
-
-        BufferedReader teclado = new BufferedReader(new InputStreamReader(System.in));
-        String linha;
-        while ((linha = teclado.readLine()) != null) {
-            linha = linha.trim();
-            if (linha.equals("sair")) {
-                break;
-            } else if (linha.equals("log")) {
-                no.imprimirHistorico();
-            } else if (linha.startsWith("buscar ")) {
-                no.buscar(linha.substring(7));
-            } else if (!linha.isEmpty()) {
-                System.out.println("Comando inválido. Use: buscar <arquivoN.ext> | log | sair");
-            }
-        }
-        no.parar();
-    }
+    
 }
 

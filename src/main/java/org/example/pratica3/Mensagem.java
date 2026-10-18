@@ -42,7 +42,7 @@ public class Mensagem implements Serializable {
         return new Mensagem(Tipo.BUSCA, id, origem, arquivo);
     }
 
-    /** Cria a RESPOSTA correspondente a esta BUSCA, copiando o caminho percorrido. */
+    // Cria a RESPOSTA correspondente a esta BUSCA, copiando o caminho percorrido. 
     public Mensagem comoResposta(int responsavel, boolean encontrado) {
         Mensagem r = new Mensagem(Tipo.RESPOSTA, id, origem, arquivo);
         r.responsavel = responsavel;
