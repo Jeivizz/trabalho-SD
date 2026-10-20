@@ -4,31 +4,22 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.UUID;
 
-/**
- * QUESTÃO 3 - Mensagem composta trocada entre os nós do anel.
- *
- * É um objeto Serializable enviado com ObjectOutputStream sobre TCP
- * (mensagem "composta": mistura String, int, boolean, enum e List).
- *
- * Dois tipos:
- *   BUSCA    - viaja no sentido horário: P(i) -> P(i+1), até achar o responsável.
- *   RESPOSTA - volta pelo caminho inverso (via antecessor) até a origem.
- *
- * O campo "caminho" registra por quais nós a busca passou (P0, P1, P2...).
- */
+// Mensagem composta (o PDF permite "tipos primitivos ou compostos").
+// Serializable permite enviar o objeto inteiro via ObjectOutputStream no socket TCP.
 public class Mensagem implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    // Dois tipos de mensagem no protocolo: BUSCA (ida) e RESPOSTA (volta)
     public enum Tipo { BUSCA, RESPOSTA }
 
     public final Tipo tipo;
-    public final String id;        // identifica a busca (liga BUSCA e RESPOSTA)
+    public final String id;        // UUID curto: correlaciona BUSCA com RESPOSTA
     public final int origem;       // nó que iniciou a busca
-    public final String arquivo;   // arquivo procurado
+    public final String arquivo;   // nome do arquivo procurado
     public int responsavel = -1;   // nó que possui o arquivo (preenchido na RESPOSTA)
     public boolean encontrado = false;
-    public final ArrayList<Integer> caminho = new ArrayList<>();
+    public final ArrayList<Integer> caminho = new ArrayList<>(); // rota percorrida
 
     private Mensagem(Tipo tipo, String id, int origem, String arquivo) {
         this.tipo = tipo;
@@ -37,12 +28,14 @@ public class Mensagem implements Serializable {
         this.arquivo = arquivo;
     }
 
+    // Factory para criar uma BUSCA com id único (8 primeiros chars do UUID)
     public static Mensagem busca(int origem, String arquivo) {
         String id = UUID.randomUUID().toString().substring(0, 8);
         return new Mensagem(Tipo.BUSCA, id, origem, arquivo);
     }
 
-    // Cria a RESPOSTA correspondente a esta BUSCA, copiando o caminho percorrido. 
+    // Converte esta BUSCA em RESPOSTA mantendo o mesmo id (correlação)
+    // e copiando o caminho percorrido para o log final
     public Mensagem comoResposta(int responsavel, boolean encontrado) {
         Mensagem r = new Mensagem(Tipo.RESPOSTA, id, origem, arquivo);
         r.responsavel = responsavel;
@@ -51,6 +44,7 @@ public class Mensagem implements Serializable {
         return r;
     }
 
+    // Formata o caminho como "P0 -> P1 -> P2 -> P3" para impressão
     public String caminhoTexto() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < caminho.size(); i++) {
@@ -62,4 +56,3 @@ public class Mensagem implements Serializable {
         return sb.toString();
     }
 }
-

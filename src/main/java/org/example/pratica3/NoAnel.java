@@ -21,42 +21,31 @@ import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * QUESTÃO 3 - Um nó (processo Pi) do anel P2P.
- *
- * Cada nó:
- *  - tem um identificador numérico (0..5) e escuta em TCP na porta PORTA_BASE + id;
- *  - conhece o sucessor (id+1) e o antecessor (id-1), com aritmética módulo 6;
- *  - guarda 10 arquivos (simulados por Strings): Pi tem arquivos 10*i+1 .. 10*i+10;
- *  - NÃO existe servidor central: a busca é repassada de nó em nó (sentido horário).
- *
- * Multithread: uma thread aceita conexões; cada conexão recebida é tratada por
- * outra thread do pool. A thread principal (console) pode iniciar buscas ao mesmo
- * tempo em que o nó atende mensagens de outros.
- *
- * Fluxo de uma busca (ex.: P0 procura arquivo35.ext):
- *   P0 -BUSCA-> P1 -BUSCA-> P2 -BUSCA-> P3 (tem!)
- *   P0 <-RESPOSTA- P1 <-RESPOSTA- P2 <-RESPOSTA- P3   (volta pelos antecessores)
- */
 public class NoAnel {
 
+    // Constantes do cenário pedido no PDF
     public static final int TOTAL_NOS = 6;
     public static final int ARQUIVOS_POR_NO = 10;
-    public static final int TOTAL_ARQUIVOS = TOTAL_NOS * ARQUIVOS_POR_NO;
-    public static final int PORTA_BASE = 7000;
+    public static final int TOTAL_ARQUIVOS = TOTAL_NOS * ARQUIVOS_POR_NO; // 60
+    public static final int PORTA_BASE = 7000; // P0=7000, P1=7001, ...
     public static final String MSG_ERRO_ENTRADA = "Erro na entrada de dados. Tente outra vez!";
 
-    // Formato aceito: arquivo<N>.ext, N inteiro positivo sem zeros à esquerda. 
+    // Regex que valida o formato "arquivoN.ext" (N de 1 a 9 dígitos).
+    // Rejeita "arquivoABC.ext" e "arquivo0.ext" já na validação sintática.
     private static final Pattern FORMATO = Pattern.compile("^arquivo([1-9][0-9]{0,8})\\.ext$");
     private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
     private final int id;
-    private final int sucessor;
-    private final int antecessor;
-    private final Set<String> arquivos = new HashSet<>(); // somente leitura após o construtor
-    // Buscas iniciadas por este nó que ainda aguardam RESPOSTA (idBusca -> futuro). 
+    private final int sucessor;    // (id+1) % 6  -> vizinho no sentido horário
+    private final int antecessor;  // (id+5) % 6  -> vizinho no sentido anti-horário
+    private final Set<String> arquivos = new HashSet<>(); // arquivos locais deste nó
+
+    // Correlaciona id da busca -> futuro que será completado quando a RESPOSTA chegar.
+    // ConcurrentHashMap porque várias threads do pool acessam.
     private final Map<String, CompletableFuture<Mensagem>> pendentes = new ConcurrentHashMap<>();
+    // Log de mensagens enviadas/recebidas (o PDF exige armazenar e imprimir)
     private final List<String> historico = Collections.synchronizedList(new ArrayList<>());
+    // Pool de threads: cada conexão aceita é tratada em paralelo
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r);
         t.setDaemon(true);
@@ -66,8 +55,10 @@ public class NoAnel {
 
     public NoAnel(int id) {
         this.id = id;
+        // Topologia em anel: sucessor e antecessor calculados com módulo
         this.sucessor = (id + 1) % TOTAL_NOS;
         this.antecessor = (id + TOTAL_NOS - 1) % TOTAL_NOS;
+        // Distribuição pedida: P0 tem 1..10, P1 tem 11..20, ..., P5 tem 51..60
         for (int k = id * ARQUIVOS_POR_NO + 1; k <= (id + 1) * ARQUIVOS_POR_NO; k++) {
             arquivos.add("arquivo" + k + ".ext");
         }
@@ -77,10 +68,7 @@ public class NoAnel {
         return id;
     }
 
-    // ------------------------------------------------------------------
-    // Ciclo de vida
-    // ------------------------------------------------------------------
-
+    // Sobe o ServerSocket na porta do nó e inicia a thread aceitadora
     public void iniciar() throws IOException {
         servidor = new ServerSocket(PORTA_BASE + id, 50, InetAddress.getLoopbackAddress());
         Thread aceitador = new Thread(this::aceitarConexoes, "P" + id + "-aceitador");
@@ -94,13 +82,14 @@ public class NoAnel {
     public void parar() {
         try {
             if (servidor != null) {
-                servidor.close();
+                servidor.close(); // faz accept() lançar exceção e sair do loop
             }
         } catch (IOException ignorado) {
-            // encerrando de qualquer forma
+            // fechamento normal
         }
     }
 
+    // Loop da thread aceitadora: cada conexão vira uma tarefa no pool
     private void aceitarConexoes() {
         while (!servidor.isClosed()) {
             try {
@@ -114,15 +103,17 @@ public class NoAnel {
         }
     }
 
+    // Lê UMA mensagem da conexão e despacha conforme o tipo
     private void tratarConexao(Socket s) {
         try (Socket socket = s; ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
-            Mensagem m = (Mensagem) in.readObject();
+            Mensagem m = (Mensagem) in.readObject(); // desserializa a mensagem composta
             if (m.tipo == Mensagem.Tipo.BUSCA) {
                 processarBusca(m);
             } else {
                 processarResposta(m);
             }
         } catch (Exception e) {
+            // Mensagem inválida é descartada sem derrubar o nó (robustez)
             log("Mensagem invlida/erro de leitura descartado: " + e);
         }
     }
@@ -133,23 +124,23 @@ public class NoAnel {
 
     /**
      * Valida a entrada e, se válida, inicia a busca no anel.
-     *
-     * @return futuro que completa quando a RESPOSTA chega; ou null se a entrada
-     *         for inválida (nesse caso NADA é enviado ao anel).
+     * Retorna null se a entrada for inválida (nada é enviado ao anel).
      */
     public CompletableFuture<Mensagem> buscar(String entrada) {
         String arq = entrada == null ? "" : entrada.trim();
         Matcher m = FORMATO.matcher(arq);
+        // Validação sintática (regex) + semântica (faixa 1..60)
         if (!m.matches() || Integer.parseInt(m.group(1)) > TOTAL_ARQUIVOS) {
             System.out.println(MSG_ERRO_ENTRADA);
             historico.add(hora() + " [P" + id + "] Entrada rejeitada: \"" + arq + "\"");
-            return null;
+            return null; // não propaga nada no anel (Caso 2 do PDF)
         }
 
         log("Usurio pediu busca de '" + arq + "'");
         CompletableFuture<Mensagem> futuro = new CompletableFuture<>();
 
-        if (arquivos.contains(arq)) { // já é meu: não precisa usar a rede
+        // Otimização: se o arquivo é local, nem envia mensagem
+        if (arquivos.contains(arq)) {
             Mensagem local = Mensagem.busca(id, arq);
             local.caminho.add(id);
             log("RESULTADO: '" + arq + "' e local (P" + id + "), nenhuma mensagem enviada");
@@ -157,8 +148,9 @@ public class NoAnel {
             return futuro;
         }
 
+        // Cria a BUSCA, registra o futuro pendente e envia ao sucessor
         Mensagem busca = Mensagem.busca(id, arq);
-        busca.caminho.add(id);
+        busca.caminho.add(id); // primeiro elemento do caminho é a origem
         pendentes.put(busca.id, futuro);
         if (!enviar(busca, sucessor)) {
             pendentes.remove(busca.id);
@@ -167,40 +159,45 @@ public class NoAnel {
         return futuro;
     }
 
-    // ------------------------------------------------------------------
-    // Tratamento das mensagens recebidas
-    // ------------------------------------------------------------------
-
+    // Trata uma BUSCA recebida de outro nó
     private void processarBusca(Mensagem m) {
-        int remetente = m.caminho.get(m.caminho.size() - 1);
+        int remetente = m.caminho.get(m.caminho.size() - 1); // último nó do caminho
         log("RECEBEU  BUSCA[" + m.id + "] '" + m.arquivo + "' de P" + remetente + " (origem P" + m.origem + ")");
 
-        if (m.origem == id) { // a busca deu a volta completa sem achar ninguém
+        // Se a busca voltou à origem, o arquivo não existe no anel.
+        // Sem isso, o anel entraria em loop infinito para arquivos inexistentes.
+        if (m.origem == id) {
             log("A busca deu a volta no anel: arquivo inexistente");
             concluir(m.comoResposta(-1, false));
             return;
         }
 
-        m.caminho.add(id);
+        m.caminho.add(id); // registra passagem deste nó
         if (arquivos.contains(m.arquivo)) {
+            // Responsável encontrado: responde pelo antecessor (caminho de volta)
             log("Possuo '" + m.arquivo + "'. Respondendo pelo antecessor P" + antecessor);
             enviar(m.comoResposta(id, true), antecessor);
         } else {
+            // Não tem: repassa ao sucessor (sentido horário do anel)
             log("Nao possuo '" + m.arquivo + "'. Repassando ao sucessor P" + sucessor);
             enviar(m, sucessor);
         }
     }
 
+    // Trata uma RESPOSTA recebida (volta pelo sentido anti-horário até a origem)
     private void processarResposta(Mensagem m) {
         log("RECEBEU  RESPOSTA[" + m.id + "] '" + m.arquivo + "' de P" + sucessor);
         if (m.origem == id) {
+            // Sou a origem: completo o futuro e imprimo o resultado
             concluir(m);
         } else {
+            // Não sou a origem: repasso ao antecessor
             log("Nao sou a origem. Repassando resposta ao antecessor P" + antecessor);
             enviar(m, antecessor);
         }
     }
 
+    // Finaliza a busca: imprime resultado/caminho e completa o futuro pendente
     private void concluir(Mensagem m) {
         if (m.encontrado) {
             log("RESULTADO: '" + m.arquivo + "' encontrado em P" + m.responsavel
@@ -214,12 +211,8 @@ public class NoAnel {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Envio (um socket TCP novo por mensagem)
-    // ------------------------------------------------------------------
-
+    // Envia uma mensagem para outro nó via TCP (abre conexão, serializa, fecha)
     private boolean enviar(Mensagem m, int destino) {
-        // o log vem ANTES do envio para a ordem dos logs refletir a causalidade
         log("ENVIOU   " + m.tipo + "[" + m.id + "] '" + m.arquivo + "' para P" + destino);
         try (Socket s = new Socket(InetAddress.getLoopbackAddress(), PORTA_BASE + destino);
              ObjectOutputStream out = new ObjectOutputStream(s.getOutputStream())) {
@@ -232,20 +225,18 @@ public class NoAnel {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Log
-    // ------------------------------------------------------------------
-
     private static String hora() {
         return "[" + LocalTime.now().format(HORA) + "]";
     }
 
+    // Log: imprime no console e guarda no histórico (o PDF exige os dois)
     private void log(String texto) {
         String linha = hora() + " [P" + id + "] " + texto;
         historico.add(linha);
         System.out.println(linha);
     }
 
+    // Imprime o log armazenado deste nó
     public void imprimirHistorico() {
         System.out.println("---- Log de P" + id + " (" + historico.size() + " entradas) ----");
         synchronized (historico) {
@@ -254,11 +245,4 @@ public class NoAnel {
             }
         }
     }
-
-    // ------------------------------------------------------------------
-    // Modo "um processo por terminal": java NoAnel <id 0..5>
-    // ------------------------------------------------------------------
-
-    
 }
-

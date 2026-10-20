@@ -10,23 +10,9 @@ import java.net.InetSocketAddress;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 
-// QUESTÃO 1 - Cliente registrador.
-//
-// Simula um serviço que mudou de IP e "se registra de novo" (binding dinâmico).
-// Envia UPDATE <nome> <ip> e espera a confirmação com timeout, pois UDP não
-// garante entrega: se o datagrama ou a resposta se perder, o cliente não
-// fica bloqueado para sempre.
-//
-// Diferença em relação ao ClienteRequisitante:
-//   - NÃO mantém thread ouvinte nem cache: ele é a FONTE da mudança.
-//   - NÃO se registra para receber NOTIFY: ele é quem provoca os NOTIFY.
-//   - Usa setSoTimeout porque a única coisa que ele faz é enviar UPDATE e
-//     esperar uma confirmação pontual (ATUALIZADO ou ERRO).
 public class ClienteRegistrador {
 
-    // Tempo máximo que esperamos pela confirmação do servidor. Como UDP não
-    // garante entrega, sem esse timeout o cliente ficaria bloqueado para
-    // sempre caso a resposta se perdesse.
+    // Timeout para não ficar travado esperando resposta do servidor
     private static final int TIMEOUT_MS = 2000;
 
     private final DatagramSocket socket;
@@ -34,29 +20,19 @@ public class ClienteRegistrador {
 
     public ClienteRegistrador(String host, int portaServidor) throws IOException {
         this.socket = new DatagramSocket();
-        // Timeout na recepção: se a confirmação não chegar em TIMEOUT_MS,
-        // receive() lança SocketTimeoutException e devolvemos erro ao chamador.
+        // define timeout de recepção (2s) — se o servidor não responder, lança SocketTimeoutException
         this.socket.setSoTimeout(TIMEOUT_MS);
         this.servidor = new InetSocketAddress(InetAddress.getByName(host), portaServidor);
     }
 
-    //Envia UPDATE <nome> <ip> e aguarda a confirmação do servidor.
-    //
-    //     Retorna:
-    //   - "ATUALIZADO <nome> <ip>" se o servidor aceitou a mudança;
-    //   - "ERRO <motivo>" se o servidor rejeitou (ex.: IP inválido, nome
-    //     inexistente);
-    //   - "ERRO TIMEOUT ..." se nenhuma resposta chegou dentro de TIMEOUT_MS.
-    //
-    // O chamador decide o que fazer com o resultado; esta classe não
-    // imprime diretamente para não misturar I/O com lógica.
+    // Envia UPDATE <nome> <ip> e espera confirmação
     public String atualizar(String nome, String ip) throws IOException {
         byte[] dados = ("UPDATE " + nome + " " + ip).getBytes(StandardCharsets.UTF_8);
         socket.send(new DatagramPacket(dados, dados.length, servidor));
 
         DatagramPacket resposta = new DatagramPacket(new byte[1024], 1024);
         try {
-            socket.receive(resposta);
+            socket.receive(resposta); // espera até 2s
         } catch (SocketTimeoutException e) {
             return "ERRO TIMEOUT (sem resposta do servidor em " + TIMEOUT_MS + " ms)";
         }
@@ -67,7 +43,7 @@ public class ClienteRegistrador {
         socket.close();
     }
 
-    // Modo interativo: java ClienteRegistrador [host] [porta] 
+    // main interativo: permite digitar "atualizar <nome> <ip>" ou "sair"
     public static void main(String[] args) throws Exception {
         String host = args.length > 0 ? args[0] : "localhost";
         int porta = args.length > 1 ? Integer.parseInt(args[1]) : DnsServer.PORTA_PADRAO;
