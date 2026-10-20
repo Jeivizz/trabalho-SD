@@ -25,9 +25,14 @@ public class Main {
         titulo("CASO 2b - Entrada inválida: origem P4, arquivoABC.ext");
         executar(nos[4], "arquivoABC.ext");
 
-        // O PDF pede que cada processo armazene e imprima seu log; mostramos o de P3
-        titulo("LOG ARMAZENADO de P3 (cada processo guarda e imprime suas mensagens)");
-        nos[3].imprimirHistorico();
+        // IMPRIME O HISTORICO DE TODOS OS NOS
+            titulo("HISTORICO DE LOGS DOS NOS P0 A P5");
+
+            for (NoAnel no : nos) {
+                no.imprimirHistorico();
+                System.out.println();
+            }
+
 
         // Encerra todos os nós
         for (NoAnel n : nos) {
