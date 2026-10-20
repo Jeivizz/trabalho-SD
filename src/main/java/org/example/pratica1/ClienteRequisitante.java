@@ -12,63 +12,35 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
-//QUESTÃO 1 - Cliente requisitante.
-
-// Usa um único DatagramSocket. Uma thread "ouvinte" fica sempre recebendo
-// datagramas, porque o servidor pode enviar a qualquer momento:
-//   - RESOLVIDO ...  (resposta a uma consulta)
-//   - NOTIFY ...     (atualização iniciada pelo servidor - binding dinâmico)
-// Assim a thread principal pode continuar enviando consultas sem bloquear.
-//
-// O cliente mantém um cache local (nome -> ip) atualizado tanto pelas
-// respostas (RESOLVIDO) quanto pelas notificações (NOTIFY). Esse cache
-// é o que materializa o "binding dinâmico" do ponto de vista do cliente:
-// ele vê o valor mudar sem precisar perguntar de novo.
-//
-// Decisão importante: NÃO usamos setSoTimeout no socket deste cliente.
-// A thread ouvinte precisa bloquear indefinidamente em receive() para
-// capturar NOTIFY a qualquer momento. Um timeout aqui causaria perda
-// de notificações. (O ClienteRegistrador, por outro lado, usa timeout
-// porque ele apenas envia e espera uma confirmação pontual.)
-
-
- 
 public class ClienteRequisitante {
 
-    private final String nome;
+    private final String nome; // nome do cliente (Cliente1, Cliente2...)
     private final DatagramSocket socket;
-    private final InetSocketAddress servidor;
-    //Cache local de resoluções. ConcurrentHashMap porque a thread ouvinte
-    //escreve (RESOLVIDO / NOTIFY) enquanto a thread principal lê (cache).
+    private final InetSocketAddress servidor; // endereço do DNS
+
+    // Cache local: nome -> IP. ConcurrentHashMap porque a thread "ouvinte"
+    // escreve nele enquanto o main lê (ex.: comando "cache")
     private final Map<String, String> cache = new ConcurrentHashMap<>();
-    //lag volátil para encerrar a thread ouvinte de forma limpa quando
-    //fechar() for chamado. volatile garante visibilidade entre threads.
+
     private volatile boolean ativo = true;
 
     public ClienteRequisitante(String nome, String host, int portaServidor) throws IOException {
         this.nome = nome;
-    // Porta efêmera escolhida pelo SO. O servidor responderá para este
-    // mesmo endereço (IP + porta), então precisamos manter o socket aberto.
-    this.socket = new DatagramSocket();
-    this.servidor = new InetSocketAddress(InetAddress.getByName(host), portaServidor);
+        // Um único socket é usado tanto para enviar quanto para receber.
+        // Isso é essencial: o servidor guarda o IP:porta do remetente do REGISTER
+        // e depois manda NOTIFY para essa mesma porta efêmera.
+        this.socket = new DatagramSocket();
+        this.servidor = new InetSocketAddress(InetAddress.getByName(host), portaServidor);
 
-    // Thread ouvinte em modo daemon: se o usuário encerrar o programa
-    // sem chamar fechar(), ela não impede a JVM de terminar.
-    Thread ouvinte = new Thread(this::escutar, nome + "-ouvinte");
-    ouvinte.setDaemon(true);
-    ouvinte.start();
+        // Thread daemon que fica escutando respostas/notificações em background
+        Thread ouvinte = new Thread(this::escutar, nome + "-ouvinte");
+        ouvinte.setDaemon(true);
+        ouvinte.start();
 
-    // REGISTER explícito: é isso que nos coloca na lista de clientes que
-    // recebem NOTIFY. O enunciado exige que atualizações cheguem aos
-    // requisitantes — sem este passo, o servidor não saberia para onde
-    // enviar as notificações.
-    enviar("REGISTER");
+        // Registra-se no servidor para receber atualizações (binding dinâmico)
+        enviar("REGISTER");
     }
 
-    // Envia uma consulta ao servidor. A resposta NÃO é lida aqui: ela chega
-    // na thread ouvinte e é interpretada em interpretar(). Isso evita que
-    // a thread principal fique bloqueada esperando uma resposta específica
-    // enquanto outras mensagens (ex.: NOTIFY) podem chegar.
     public void resolver(String nomeServidor) {
         enviar("RESOLVE " + nomeServidor);
     }
@@ -77,14 +49,15 @@ public class ClienteRequisitante {
         return cache.get(nomeServidor);
     }
 
+    // Cópia ordenada do cache só para impressão bonita (TreeMap)
     public Map<String, String> copiaDoCache() {
         return new TreeMap<>(cache);
     }
 
     public void fechar() {
-        enviar("UNREGISTER");
+        enviar("UNREGISTER"); // avisa o servidor para não mandar mais NOTIFY
         ativo = false;
-        socket.close();
+        socket.close(); // fecha o socket, a thread ouvinte sai do receive()
     }
 
     private void enviar(String texto) {
@@ -95,36 +68,34 @@ public class ClienteRequisitante {
             imprimir("Falha ao enviar \"" + texto + "\": " + e.getMessage());
         }
     }
-    //  Laço da thread ouvinte. Bloqueia em receive() até chegar um datagrama
-    //  e o interpreta. Sai do laço quando o socket é fechado (fechar()).
+
+    // Loop da thread ouvinte: recebe pacotes e interpreta
     private void escutar() {
         while (ativo) {
             DatagramPacket pacote = new DatagramPacket(new byte[1024], 1024);
             try {
-                socket.receive(pacote);
+                socket.receive(pacote); // bloqueia até chegar algo
             } catch (IOException e) {
-                break; // socket fechado
+                break; // socket fechado -> sai
             }
             String texto = new String(pacote.getData(), 0, pacote.getLength(), StandardCharsets.UTF_8).trim();
             interpretar(texto);
         }
     }
 
-        // Interpreta mensagens vindas do servidor. O protocolo está documentado
-        // em DnsServer. Mensagens desconhecidas são registradas no console para
-        // facilitar o diagnóstico, mas não derrubam o cliente.
+    // Trata cada tipo de mensagem vinda do servidor
     private void interpretar(String texto) {
         String[] t = texto.split("\\s+");
         if (t[0].equals("RESOLVIDO") && t.length == 3) {
+            // Resposta a um RESOLVE: guarda no cache
             cache.put(t[1], t[2]);
             imprimir("Resposta do DNS: " + t[1] + " -> " + t[2]);
         } else if (t[0].equals("NOTIFY") && t.length == 3) {
-              // Binding dinâmico: o servidor avisa que o IP mudou. Atualizamos o
-              // cache local. A partir daqui, consultarCache() já devolve o novo IP.
-            String antigo = cache.put(t[1], t[2]);
-           imprimir("*** NOTIFICAÇÃO: " + t[1] + " mudou"
-        + (antigo != null ? " de " + antigo : " (não estava no cache)")
-        + " para " + t[2]);
+            // *** BINDING DINÂMICO: servidor avisou que o IP mudou ***
+            String antigo = cache.put(t[1], t[2]); // atualiza o cache
+            imprimir("*** NOTIFICAÇÃO: " + t[1] + " mudou"
+                    + (antigo != null ? " de " + antigo : " (não estava no cache)")
+                    + " para " + t[2]);
         } else if (t[0].equals("REGISTRADO")) {
             imprimir("Registrado no servidor para receber atualizações");
         } else if (t[0].equals("DESREGISTRADO")) {
@@ -140,7 +111,6 @@ public class ClienteRequisitante {
         System.out.println("  [" + nome + "] " + texto);
     }
 
-    // Modo interativo: java ClienteRequisitante Cliente1 [host] [porta] 
     public static void main(String[] args) throws Exception {
         String nome = args.length > 0 ? args[0] : "Cliente1";
         String host = args.length > 1 ? args[1] : "localhost";
@@ -164,7 +134,4 @@ public class ClienteRequisitante {
         }
         c.fechar();
     }
-
-
-
 }
